@@ -9,18 +9,28 @@ function Get-LLMResponse {
         [string]$ModelURI = "https://oa-ucefdev-openai-2.openai.azure.com/openai/deployments/ucefdev-language-16k/chat/completions?api-version=2023-03-15-preview"
     )
 
-    $usermessage = @{
-        "role" = "user"
-        "content"= $userPrompt
-    }
-
-
-
-    $usermessage | Out-Host
-
+    $PreviousObject | Out-Host
 
     if ($PSBoundParameters.ContainsKey('PreviousObject')) {
-        Remove-Variable ht -ErrorAction SilentlyContinue
+        Remove-Variable h -ErrorAction SilentlyContinue
+        <# $h = @{}
+        $PreviousObject.psobject.properties | 
+            ForEach-Object { $h[$_.Name] = $_.Value }
+        #>
+        $messages = @()
+        $SystemHash = @{
+                "role" = "system"  
+                "content" = $SystemPrompt 
+        }
+        $messages += $SystemHash
+
+        $usermessage = @{
+            "role" = "user"
+            "content"= $userPrompt
+        }
+        $messages += $usermessage
+        $messages += $PreviousObject
+        
         $body = @{  
             "messages" = @(  
                 @{  
@@ -28,7 +38,7 @@ function Get-LLMResponse {
                     "content" = $SystemPrompt 
                 },
                 $usermessage,
-                $ht
+                $PreviousObject
             )  
             "max_tokens" = $MaxToken  
             "temperature" = 0.5  
@@ -69,20 +79,16 @@ function Get-LLMResponse {
     $apiResponse.choices.message.psobject.properties | 
         ForEach-Object { $ho[$_.Name] = $_.Value }
     if ($PSBoundParameters.ContainsKey('PreviousObject')) {
-        $out = @{
-            "messages" = @(
+        $out =  @(
                 $usermessage,
                 $ht,
                 $ho
             )
-        }
     } else {
-        $out = @{
-            "messages" = @(
+        $out = @(
                 $usermessage,
                 $ho
-            )
-        }
+        )
     
     }
     $out
@@ -96,13 +102,26 @@ $aiToken = Get-AzAccessToken -ResourceUrl 'https://cognitiveservices.azure.com'
 
 
 $r1 = Get-LLMResponse  -TokenValue $aiToken.Token
-
+<#
 $h1 = @{}
 $r1.psobject.properties | 
     ForEach-Object { $h1[$_.Name] = $_.Value }
+#>
+function Find-LastAssistantMessage {
+    param ($LLMOutput)
 
+    Remove-Variable i,j -ErrorAction SilentlyContinue
+    [int]$i = 0
+    foreach ($a in $LLMOutput.GetEnumerator()) {
+        #Write-Host "$($i) $($a.role) = $($a.content)"
+        IF ($a.role -eq 'assistant' ) {$j = $a.content}
+        $i++
+    }
+    $j
+}
 
-$a1 = Read-Host "$($r1.content)" 
+$x = Find-LastAssistantMessage $r1
+$a1 = Read-Host "$($x)" 
 
 $r2 = Get-LLMResponse -TokenValue $aiToken.Token -PreviousObject $r1 -userPrompt $a1 
 $h2 = @{}
