@@ -1,66 +1,84 @@
+# This script is a demo of the function to submit a LLM response (using Azure OpenAI)
+
+# This function takes a few parameters and submits an LLM (Azure OpenAI) request, it can take chat history if needed.
 function Get-LLMResponse {
+    [CmdletBinding()]
     param (
+        [Parameter(Position=0,mandatory=$true)]
         [string]$userPrompt,
-        [string]$SystemPrompt = "You are an assistant that helps creating content based on a sequence of questions that you ask and answers the user provides. You will ask one question and wait for one answer, only then you will ask the next question. For maximum efficiency, your questions must be simple YES/NO or simple multiple-choice, do not ask open questions. You will design each next question to maximize the knowledge you accumulate about the subject. Afer the user answers your last question you will output a rich and meaningul seamless document based on the original request of the user and you will start that last response with the string ---COMPLETE---.",
+        [Parameter(mandatory=$true)]
         [string]$TokenValue,
+        [Parameter(mandatory=$false)]
         $PreviousObject,
+        [string]$SystemPrompt = 'You are a chat-type assistant that will answer open questions.',
+        [Parameter(mandatory=$false)]
         [Int32]$MaxToken = 8000,
         [string]$TokenType = 'Bearer',
         [string]$ModelURI = "https://oa-ucefdev-openai-2.openai.azure.com/openai/deployments/ucefdev-language-16k/chat/completions?api-version=2023-03-15-preview"
     )
 
-        $messages = @()
-        $SystemHash = @{
-                "role" = "system"  
-                "content" = $SystemPrompt 
-        }
-        $messages += $SystemHash
+    # init request elements
+    $messages = @()
 
-        if ($PSBoundParameters.ContainsKey('PreviousObject')) {
-            $messages += $PreviousObject
-        }
-        
-        $usermessage = @{
-            "role" = "user"
-            "content"= $userPrompt
-        }
-        $messages += $usermessage
+    # System Prompt
+    $SystemHash = @{
+            "role" = "system"  
+            "content" = $SystemPrompt 
+    }
+    $messages += $SystemHash
 
-        $body = @{  
-            "messages" = $messages
-            "max_tokens" = $MaxToken  
-            "temperature" = 0.5  
-            "frequency_penalty" = 0  
-            "presence_penalty" = 0  
-            "top_p" = 0.95  
-            "stop" = $null  
-        } | ConvertTo-Json 
-        
-        $body | Out-Host
+    # Chat History
+    if ($PSBoundParameters.ContainsKey('PreviousObject')) {
+        $messages += $PreviousObject
+    }
+    
+    # Current iterations' users' prompt
+    $usermessage = @{
+        "role" = "user"
+        "content"= $userPrompt
+    }
+    $messages += $usermessage
 
+    # Build JSON request body
+    $body = @{  
+        "messages" = $messages
+        "max_tokens" = $MaxToken  
+        "temperature" = 0.5  
+        "frequency_penalty" = 0  
+        "presence_penalty" = 0  
+        "top_p" = 0.95  
+        "stop" = $null  
+    } | ConvertTo-Json -Compress
+    
+    $body | Write-Verbose
     $aiHeaders = @{
         'Authorization' = "$($TokenType) $($TokenValue)"
         'Content-type' = 'application/json'
       }
     
-    $body | Out-Host
+    # Finally, submit REST 
     $apiResponse = Invoke-RestMethod -Method Post -Uri $ModelURI -Headers $aiHeaders -Body $body
 
-    Remove-Variable ho,myOutput -ErrorAction SilentlyContinue
+    # Build function output including history
+    Remove-Variable h,myOutput -ErrorAction SilentlyContinue
     $myOutput = @()
-    $ho = @{}
+    
     if ($PSBoundParameters.ContainsKey('PreviousObject')) {
         $myOutput += $PreviousObject
     }
     $myOutput += $usermessage
     
+    # it needs to be a hash...
+    $h = @{}
     $apiResponse.choices.message.psobject.properties | 
-        ForEach-Object { $ho[$_.Name] = $_.Value }
-
-    $myOutput += $ho 
+        ForEach-Object { $h[$_.Name] = $_.Value }
+    $myOutput += $h
+    
+    # just return the object.
     $myOutput
 }
 
+# separate function to parse the last assistant response, just to make code more readable
 function Find-LastAssistantMessage {
     param ($LLMOutput)
 
@@ -74,78 +92,45 @@ function Find-LastAssistantMessage {
     $j
 }
 
-Connect-AzAccount -UseDeviceAuthentication
+cls
+# Login 
+if ($aitoken) {
+    Write-Host "Already logged in as `"$($aitoken.UserId)`"."
+} else {
+    Connect-AzAccount -UseDeviceAuthentication
+}
+if ($aiToken.ExpiresOn -le (get-date))  {
+    $aiToken = Get-AzAccessToken -ResourceUrl 'https://cognitiveservices.azure.com'
+}
 
-$aiToken = Get-AzAccessToken -ResourceUrl 'https://cognitiveservices.azure.com'
+# Demo user prompt
+$CreateCVSystem = "You are an assistant that helps creating content based on a sequence of questions that you ask and answers the user provides. You will ask one question and wait for one answer, only then you will ask the next question. You will design each next question to maximize the knowledge you accumulate about the subject. After the user answers your last question you will output a rich and meaningul seamless document based on the original request of the user and you will start that last response with the string ---COMPLETE---. Before each question you will inform the user a rough estimate how much information you think is needed the user has already provided in the format of `"You have answered x number of questions, I think with y more questions The information you have provided will be enough`". For maximum efficiency, ALWAYS ask in the form of simple multiple-choice prompting using letters for each choice. NEVER ask open-ended questions."
+$CreateCVPrompt = "I want to create a CV but I dont know how, so: come up with a number of questions and when you have enough information, build a complete rich CV. The name and contact information should be in the last question. Ready? Ask question one:"
 
-$CreateCVPropmpt = "I want to create a CV but I dont know how, so: come up with 6 questions that will build an excellent CV for me. Do not ask me contact details, as I will complete these later. Ready? Ask question one:"
-
-
-Remove-Variable r, x -ErrorAction SilentlyContinue
-$a = $CreateCVPropmpt
-while ($x -notlike "*---COMPLETE---*") {
+# loop until complete response.
+Remove-Variable r -ErrorAction SilentlyContinue
+$exit = $false
+$a = $CreateCVPrompt
+[string[]]$x = ''
+do {
     if ($r) {
-        $r = Get-LLMResponse  -TokenValue $aiToken.Token -userPrompt $a -PreviousObject $r
+        $r = Get-LLMResponse -TokenValue $aiToken.Token -userPrompt $a -PreviousObject $r -SystemPrompt $CreateCVSystem
     } else {
-        $r = Get-LLMResponse  -TokenValue $aiToken.Token -userPrompt $a
+        $r = Get-LLMResponse -TokenValue $aiToken.Token -userPrompt $a -SystemPrompt $CreateCVSystem
+    }
+    Write-Host "Type EXIT to quit."
+    IF ($r) {
+        $x = Find-LastAssistantMessage $r
+    }
+    else {
+        write-host "LLM Response was null or unexpected result, exiting." -ForegroundColor Yellow
+        $exit = $true
+    }
+    if ($x) {
+        $a = Read-Host "$($x)"
+        if ($a -eq 'EXIT') {
+            $exit = $true
+        }   
     }
     cls
-    $x = Find-LastAssistantMessage $r
-    $a = Read-Host "$($x)" 
-}
-
-
-$r2 = Get-LLMResponse -TokenValue $aiToken.Token -PreviousObject $r1 -userPrompt $a1 
-
-$x = Find-LastAssistantMessage $r2
-$a2 = Read-Host "$($x)" 
-
-$r3 = Get-LLMResponse -TokenValue $aiToken.Token -PreviousObject $r2 -userPrompt $a2
-$h2 = @{}
-$r2.psobject.properties | 
-    ForEach-Object { $h2[$_.Name] = $_.Value }
-$h = @{
-    $h1,
-    $h2
-}
-
-#$response = Invoke-WebRequest -Uri $aiuri -Method POST -Headers $authHeader -Body $body  
-
-| Out-Host
-
-
-        $codeMessage = @{
-    "role" = "user"
-    "content"= $AssistantResponse | ConvertTo-Json
-    }
-$CommentPrompt = "You are an API function that takes an input block of text from the user that may contain programming or scripting code, or a combination of text an code. You will first detect the programming or scripting language of the code. Then you will convert any non-runnable text or comments into syntactically and contextually correct code in the format of the original language."
-$bodyCode = @{  
-    "messages" = @(  
-        @{  
-            "role" = "system"  
-            "content" = $CommentPrompt
-        },
-        $codeMessage 
-    )  
-    "max_tokens" = $MaxToken  
-    "temperature" = 0.3  
-    "frequency_penalty" = 0  
-    "presence_penalty" = 0  
-    "top_p" = 0.95  
-    "stop" = $null  
-} | ConvertTo-Json -Compress
-
-$apiCodeResponse = Invoke-RestMethod -Method Post -Uri $aiuri -Headers $aiHeaders -Body $bodyCode
-
-$runnableCode = $apiCodeResponse.choices.message.content 
-
-Write-Host "Now I will do what no human should allow ever - to run AI-generated code." -ForegroundColor Yellow -BackgroundColor Red
-write-host 
-$runnableCode | Out-Host
-Write-Host "Remember SKYNET!!" -ForegroundColor Yellow -BackgroundColor Red
-write-host 
-$answer = Read-Host "Type YES to save and run the code block above:" 
-if ($answer = 'YES') {
-    $runnableCode | Out-File $outputCodeFileName 
-    & .\$outputCodeFileName
-}
+} until ([Boolean]($x | Select-String "---COMPLETE---" -SimpleMatch) -or $exit) 
