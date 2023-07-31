@@ -1,101 +1,56 @@
-param (
-    [string[]]$userTextData,
-    [string]$userInstruction = "Please convert the sample BASIC Code below into Powershell Code:" ,
-    $outputCodeFileName = "outputScript.ps1"
-)
+# separate function to parse the last assistant response, just to make code more readable
+function Find-LastAssistantMessage {
+    param ($LLMOutput)
 
-Connect-AzAccount -UseDeviceAuthentication
-
-$sampleBASICCode = 
-@"  
-10 PRINT "HELLO WORLD!"
-20 GOTO 10
-"@  
-
-if ($PSBoundParameters.ContainsKey('userTextData')) {  
-    
-} else {  
-    Write-Host "userPrompt was not specified, using sample BASIC Code."
-    $userTextData = $sampleBASICCode
-}  
-
-$systemPrompt = 'You are an AI API that actions on a pair of parameters, a text instruction and a block of text that may contain code or text and code. You should process the instruction and if it involves generating text, it must syntactically correct, runnable code on the correct programming or scripting language. Your output is a single file containing exclusively programming or scripting language code.'
-$MaxToken = 16000
-
-
-$aiToken = Get-AzAccessToken -ResourceUrl 'https://cognitiveservices.azure.com'
-
-$aiuri = "https://oa-ucefdev-openai-2.openai.azure.com/openai/deployments/ucefdev-language-16k/chat/completions?api-version=2023-03-15-preview"
-
-
-$aiHeaders = @{
-    'Authorization' = "$($aiToken.Type) $($aiToken.Token)"
-    'Content-type' = 'application/json'
-  }
-Remove-Variable userPrompt -ErrorAction SilentlyContinue
-[string[]]$userPrompt = $userInstruction +[environment]::Newline + $userTextData
-$usermessage = @{
-    "role" = "user"
-    "content"= $userPrompt | ConvertTo-Json
-  }
-$body = @{  
-    "messages" = @(  
-        @{  
-            "role" = "system"  
-            "content" = $SystemPrompt 
-        },
-        $usermessage
-    )  
-    "max_tokens" = $MaxToken  
-    "temperature" = 0.5  
-    "frequency_penalty" = 0  
-    "presence_penalty" = 0  
-    "top_p" = 0.95  
-    "stop" = $null  
-} | ConvertTo-Json -Compress
-
-#$response = Invoke-WebRequest -Uri $aiuri -Method POST -Headers $authHeader -Body $body  
-
-$apiResponse = Invoke-RestMethod -Method Post -Uri $aiuri -Headers $aiHeaders -Body $body
-
-$apiresponse.choices.message.content | Out-Host
-
-$AssistantResponse = $apiresponse.choices.message | 
-    Where-Object {$_.role -eq 'assistant'} | 
-        Select-Object -ExpandProperty content
-
-        $codeMessage = @{
-    "role" = "user"
-    "content"= $AssistantResponse | ConvertTo-Json
+    Remove-Variable i,j -ErrorAction SilentlyContinue
+    [int]$i = 0
+    foreach ($a in $LLMOutput.GetEnumerator()) {
+        #Write-Host "$($i) $($a.role) = $($a.content)"
+        IF ($a.role -eq 'assistant' ) {$j = $a.content}
+        $i++
     }
-$CommentPrompt = "You are an API function that takes an input block of text from the user that may contain programming or scripting code, or a combination of text an code. You will first detect the programming or scripting language of the code. Then you will convert any non-runnable text or comments into syntactically and contextually correct code in the format of the original language."
-$bodyCode = @{  
-    "messages" = @(  
-        @{  
-            "role" = "system"  
-            "content" = $CommentPrompt
-        },
-        $codeMessage 
-    )  
-    "max_tokens" = $MaxToken  
-    "temperature" = 0.3  
-    "frequency_penalty" = 0  
-    "presence_penalty" = 0  
-    "top_p" = 0.95  
-    "stop" = $null  
-} | ConvertTo-Json -Compress
-
-$apiCodeResponse = Invoke-RestMethod -Method Post -Uri $aiuri -Headers $aiHeaders -Body $bodyCode
-
-$runnableCode = $apiCodeResponse.choices.message.content 
-
-Write-Host "Now I will do what no human should allow ever - to run AI-generated code." -ForegroundColor Yellow -BackgroundColor Red
-write-host 
-$runnableCode | Out-Host
-Write-Host "Remember SKYNET!!" -ForegroundColor Yellow -BackgroundColor Red
-write-host 
-$answer = Read-Host "Type YES to save and run the code block above:" 
-if ($answer = 'YES') {
-    $runnableCode | Out-File $outputCodeFileName 
-    & .\$outputCodeFileName
+    $j
 }
+
+cls
+# Login 
+if ($aitoken) {
+    Write-Host "Already logged in as `"$($aitoken.UserId)`"."
+} else {
+    Connect-AzAccount -UseDeviceAuthentication
+}
+if ($aiToken.ExpiresOn -le (get-date))  {
+    $aiToken = Get-AzAccessToken -ResourceUrl 'https://cognitiveservices.azure.com'
+}
+
+# Demo user prompt
+$CreateCVSystem = "You are an assistant that helps creating content based on a sequence of questions that you ask and answers the user provides. You will ask one question and wait for one answer, only then you will ask the next question. You will design each next question to maximize the knowledge you accumulate about the subject. After the user answers your last question you will output a rich and meaningul seamless document based on the original request of the user and you will start that last response with the string ---COMPLETE---. Before each question you will inform the user a rough estimate how much information you think is needed the user has already provided in the format of `"You have answered x number of questions, I think with y more questions The information you have provided will be enough`". For maximum efficiency, ALWAYS ask in the form of simple multiple-choice prompting using letters for each choice. NEVER ask open-ended questions."
+$CreateCVPrompt = "I want to create a CV but I dont know how, so: come up with a number of questions and when you have enough information, build a complete rich CV. The name and contact information should be in the last question. Ready? Ask question one:"
+
+# loop until complete response.
+Remove-Variable r -ErrorAction SilentlyContinue
+$exit = $false
+$a = $CreateCVPrompt
+[string[]]$x = ''
+do {
+    if ($r) {
+        $r = Get-LLMResponse -TokenValue $aiToken.Token -userPrompt $a -PreviousObject $r -SystemPrompt $CreateCVSystem
+    } else {
+        $r = Get-LLMResponse -TokenValue $aiToken.Token -userPrompt $a -SystemPrompt $CreateCVSystem
+    }
+    Write-Host "Type EXIT to quit."
+    IF ($r) {
+        $x = Find-LastAssistantMessage $r
+    }
+    else {
+        write-host "LLM Response was null or unexpected result, exiting." -ForegroundColor Yellow
+        $exit = $true
+    }
+    if ($x) {
+        $a = Read-Host "$($x)"
+        if ($a -eq 'EXIT') {
+            $exit = $true
+        }   
+    }
+    cls
+} until ([Boolean]($x | Select-String "---COMPLETE---" -SimpleMatch) -or $exit) 
