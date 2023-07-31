@@ -25,7 +25,9 @@ $MaxToken = 16000
 
 $aiToken = Get-AzAccessToken -ResourceUrl 'https://cognitiveservices.azure.com'
 
-$aiuri = "https://oa-ucefdev-openai-2.openai.azure.com/openai/deployments/ucefdev-language-16k/chat/completions?api-version=2023-03-15-preview"
+# play with model to change programming language
+
+$aiuri = "https://{oairesource}.openai.azure.com/openai/deployments/{oaimodelname}/chat/completions?api-version=2023-03-15-preview"
 
 
 $aiHeaders = @{
