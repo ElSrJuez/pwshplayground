@@ -1,4 +1,6 @@
 # separate function to parse the last assistant response, just to make code more readable
+# Ref: https://github.com/ElSrJuez/pwshplayground/blob/main/Get-LLMResponse.ps1
+
 function Find-LastAssistantMessage {
     param ($LLMOutput)
 
