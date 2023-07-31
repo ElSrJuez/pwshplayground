@@ -1,66 +1,84 @@
+# This script is a demo of the function to submit a LLM response (using Azure OpenAI)
+
+# This function takes a few parameters and submits an LLM (Azure OpenAI) request, it can take chat history if needed.
 function Get-LLMResponse {
+    [CmdletBinding()]
     param (
+        [Parameter(Position=0,mandatory=$true)]
         [string]$userPrompt,
-        [string]$SystemPrompt = "You are an assistant that helps creating content based on a sequence of questions that you ask and answers the user provides. You will ask one question and wait for one answer, only then you will ask the next question. For maximum efficiency, your questions must be simple YES/NO or simple multiple-choice, do not ask open questions. You will design each next question to maximize the knowledge you accumulate about the subject. Afer the user answers your last question you will output a rich and meaningul seamless document based on the original request of the user and you will start that last response with the string ---COMPLETE---.",
+        [Parameter(mandatory=$true)]
         [string]$TokenValue,
+        [Parameter(mandatory=$false)]
         $PreviousObject,
+        [string]$SystemPrompt = "You are an assistant that helps creating content based on a sequence of questions that you ask and answers the user provides. You will ask one question and wait for one answer, only then you will ask the next question. For maximum efficiency, your questions must be simple YES/NO or simple multiple-choice, do not ask open questions. You will design each next question to maximize the knowledge you accumulate about the subject. Afer the user answers your last question you will output a rich and meaningul seamless document based on the original request of the user and you will start that last response with the string ---COMPLETE---.",
         [Int32]$MaxToken = 8000,
         [string]$TokenType = 'Bearer',
-        [string]$ModelURI = "https://oa-ucefdev-openai-2.openai.azure.com/openai/deployments/ucefdev-language-16k/chat/completions?api-version=2023-03-15-preview"
+        [string]$ModelURI = "https://oa-ucefdev-openai-2.openai.azure.com/openai/deployments/ucefdev-language-16k/chat/completions?api-version=2023-03-15-preview",
+        [switch]$Verbose
     )
 
-        $messages = @()
-        $SystemHash = @{
-                "role" = "system"  
-                "content" = $SystemPrompt 
-        }
-        $messages += $SystemHash
+    # init request elements
+    $messages = @()
 
-        if ($PSBoundParameters.ContainsKey('PreviousObject')) {
-            $messages += $PreviousObject
-        }
-        
-        $usermessage = @{
-            "role" = "user"
-            "content"= $userPrompt
-        }
-        $messages += $usermessage
+    # System Prompt
+    $SystemHash = @{
+            "role" = "system"  
+            "content" = $SystemPrompt 
+    }
+    $messages += $SystemHash
 
-        $body = @{  
-            "messages" = $messages
-            "max_tokens" = $MaxToken  
-            "temperature" = 0.5  
-            "frequency_penalty" = 0  
-            "presence_penalty" = 0  
-            "top_p" = 0.95  
-            "stop" = $null  
-        } | ConvertTo-Json 
-        
-        $body | Out-Host
+    # Chat History
+    if ($PSBoundParameters.ContainsKey('PreviousObject')) {
+        $messages += $PreviousObject
+    }
+    
+    # Current iterations' users' prompt
+    $usermessage = @{
+        "role" = "user"
+        "content"= $userPrompt
+    }
+    $messages += $usermessage
 
+    # Build JSON request body
+    $body = @{  
+        "messages" = $messages
+        "max_tokens" = $MaxToken  
+        "temperature" = 0.5  
+        "frequency_penalty" = 0  
+        "presence_penalty" = 0  
+        "top_p" = 0.95  
+        "stop" = $null  
+    } | ConvertTo-Json -Compress
+    
+    $body | Write-Verbose
     $aiHeaders = @{
         'Authorization' = "$($TokenType) $($TokenValue)"
         'Content-type' = 'application/json'
       }
     
-    $body | Out-Host
+    # Finally, submit REST 
     $apiResponse = Invoke-RestMethod -Method Post -Uri $ModelURI -Headers $aiHeaders -Body $body
 
-    Remove-Variable ho,myOutput -ErrorAction SilentlyContinue
+    # Build function output including history
+    Remove-Variable h,myOutput -ErrorAction SilentlyContinue
     $myOutput = @()
-    $ho = @{}
+    
     if ($PSBoundParameters.ContainsKey('PreviousObject')) {
         $myOutput += $PreviousObject
     }
     $myOutput += $usermessage
     
+    # it needs to be a hash...
+    $h = @{}
     $apiResponse.choices.message.psobject.properties | 
-        ForEach-Object { $ho[$_.Name] = $_.Value }
-
-    $myOutput += $ho 
+        ForEach-Object { $h[$_.Name] = $_.Value }
+    $myOutput += $h
+    
+    # just return the object.
     $myOutput
 }
 
+# separate function to parse the last assistant response, just to make code more readable
 function Find-LastAssistantMessage {
     param ($LLMOutput)
 
@@ -74,18 +92,19 @@ function Find-LastAssistantMessage {
     $j
 }
 
+# Login 
 Connect-AzAccount -UseDeviceAuthentication
-
 $aiToken = Get-AzAccessToken -ResourceUrl 'https://cognitiveservices.azure.com'
 
+# Demo user prompt
 $CreateCVPropmpt = "I want to create a CV but I dont know how, so: come up with 6 questions that will build an excellent CV for me. Do not ask me contact details, as I will complete these later. Ready? Ask question one:"
 
-
+# loop until complete response.
 Remove-Variable r, x -ErrorAction SilentlyContinue
 $a = $CreateCVPropmpt
 while ($x -notlike "*---COMPLETE---*") {
     if ($r) {
-        $r = Get-LLMResponse  -TokenValue $aiToken.Token -userPrompt $a -PreviousObject $r
+        $r = Get-LLMResponse  -TokenValue $aiToken.Token -userPrompt $a -PreviousObject $r -ver
     } else {
         $r = Get-LLMResponse  -TokenValue $aiToken.Token -userPrompt $a
     }
