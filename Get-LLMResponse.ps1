@@ -93,8 +93,14 @@ function Find-LastAssistantMessage {
 }
 
 # Login 
-Connect-AzAccount -UseDeviceAuthentication
-$aiToken = Get-AzAccessToken -ResourceUrl 'https://cognitiveservices.azure.com'
+if ($aitoken) {
+    Write-Host "Already logged in as `"$($aitoken.UserId)`"."
+} else {
+    Connect-AzAccount -UseDeviceAuthentication
+}
+if ($aiToken.ExpiresOn -le (get-date))  {
+    $aiToken = Get-AzAccessToken -ResourceUrl 'https://cognitiveservices.azure.com'
+}
 
 # Demo user prompt
 $CreateCVSystem = "You are an assistant that helps creating content based on a sequence of questions that you ask and answers the user provides. You will ask one question and wait for one answer, only then you will ask the next question. You will design each next question to maximize the knowledge you accumulate about the subject. After the user answers your last question you will output a rich and meaningul seamless document based on the original request of the user and you will start that last response with the string ---COMPLETE---. Before each question you will inform the user a rough estimate how much information you think is needed the user has already provided in the format of `"You have answered x number of questions, I think with y more questions The information you have provided will be enough`". For maximum efficiency, ALWAYS ask in the form of simple multiple-choice prompting using letters for each choice. NEVER ask open-ended questions."
