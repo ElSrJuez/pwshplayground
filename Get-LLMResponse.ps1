@@ -92,6 +92,7 @@ function Find-LastAssistantMessage {
     $j
 }
 
+cls
 # Login 
 if ($aitoken) {
     Write-Host "Already logged in as `"$($aitoken.UserId)`"."
@@ -117,7 +118,6 @@ do {
     } else {
         $r = Get-LLMResponse -TokenValue $aiToken.Token -userPrompt $a -SystemPrompt $CreateCVSystem
     }
-    cls
     Write-Host "Type EXIT to quit."
     IF ($r) {
         $x = Find-LastAssistantMessage $r
@@ -132,4 +132,5 @@ do {
             $exit = $true
         }   
     }
+    cls
 } until ([Boolean]($x | Select-String "---COMPLETE---" -SimpleMatch) -or $exit) 
