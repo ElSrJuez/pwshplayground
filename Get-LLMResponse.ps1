@@ -15,7 +15,7 @@ function Get-LLMResponse {
         [string]$SystemPrompt = 'You are a chat-type assistant that will answer open questions.',
         [Parameter(mandatory=$false)]
         [Int32]$MaxToken = 8000,
-        [string]$TokenType = 'Bearer',
+        [string]$TokenType = 'Bearer'
     )
 
     # init request elements
